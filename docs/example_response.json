@@ -1,0 +1,172 @@
+{
+  "analysis_id": "f47ac10b-58cc-4372-a567-0e02b2c3d479",
+  "timestamp": "2025-03-21T14:32:00Z",
+  "architecture_summary": "A microservices e-commerce application with an API Gateway fronting multiple services (Auth, Orders, Payments, Notifications). PostgreSQL and Redis are used for persistence. An admin dashboard communicates directly with internal services. External payment processor integration visible.",
+  "threats": [
+    {
+      "id": "T001",
+      "category": "Spoofing",
+      "stride_letter": "S",
+      "title": "JWT token forgery at API Gateway",
+      "description": "If the API Gateway uses a weak or symmetric JWT signing key, an attacker could forge valid tokens and impersonate any user, including administrators.",
+      "affected_components": ["API Gateway", "Auth Service"],
+      "risk_level": "HIGH",
+      "likelihood": "MEDIUM",
+      "impact": "HIGH",
+      "mitigations": [
+        "Use RS256 (asymmetric) signing algorithm for JWT tokens",
+        "Implement short token expiration (15 minutes) with refresh token rotation",
+        "Add token revocation list using Redis-based blacklist",
+        "Validate audience (aud) and issuer (iss) claims on every request"
+      ],
+      "references": ["OWASP A07:2021", "CWE-287", "CWE-345"]
+    },
+    {
+      "id": "T002",
+      "category": "Tampering",
+      "stride_letter": "T",
+      "title": "Order data manipulation via unprotected internal API",
+      "description": "The Orders Service API appears to have no authentication for internal calls. A compromised container could tamper with order records by making direct API calls.",
+      "affected_components": ["Orders Service", "PostgreSQL", "API Gateway"],
+      "risk_level": "HIGH",
+      "likelihood": "LOW",
+      "impact": "CRITICAL",
+      "mitigations": [
+        "Implement mTLS between all internal microservices",
+        "Add service mesh with per-service identity (e.g., Istio/Linkerd)",
+        "Sign critical order events with HMAC before persisting"
+      ],
+      "references": ["OWASP A01:2021", "CWE-306"]
+    },
+    {
+      "id": "T003",
+      "category": "Repudiation",
+      "stride_letter": "R",
+      "title": "No audit trail for payment transactions",
+      "description": "Payment processing flows are not logged with immutable audit records, allowing disputes where neither party can prove what occurred.",
+      "affected_components": ["Payments Service", "External Payment Processor"],
+      "risk_level": "HIGH",
+      "likelihood": "MEDIUM",
+      "impact": "HIGH",
+      "mitigations": [
+        "Implement append-only audit log for all payment events",
+        "Use digital signatures on payment confirmation messages",
+        "Store logs in tamper-evident storage (e.g., Azure Immutable Blob Storage)"
+      ],
+      "references": ["PCI-DSS 10.2", "CWE-223"]
+    },
+    {
+      "id": "T004",
+      "category": "Information Disclosure",
+      "stride_letter": "I",
+      "title": "Unencrypted inter-service communication exposes PII",
+      "description": "HTTP (not HTTPS) connections between services could expose customer PII (names, addresses, payment card data) in plaintext on the internal network.",
+      "affected_components": ["All microservices", "PostgreSQL", "Redis"],
+      "risk_level": "CRITICAL",
+      "likelihood": "MEDIUM",
+      "impact": "CRITICAL",
+      "mitigations": [
+        "Enforce TLS 1.2+ for all inter-service communication",
+        "Encrypt sensitive fields at the application level (AES-256)",
+        "Use VNet service endpoints to restrict database access",
+        "Enable PostgreSQL SSL mode = require"
+      ],
+      "references": ["OWASP A02:2021", "CWE-319", "GDPR Art. 32"]
+    },
+    {
+      "id": "T005",
+      "category": "Information Disclosure",
+      "stride_letter": "I",
+      "title": "Redis cache stores sensitive session data without encryption",
+      "description": "Session tokens and user profile data cached in Redis are stored in plaintext. A compromised Redis instance exposes all active sessions.",
+      "affected_components": ["Redis", "Auth Service"],
+      "risk_level": "HIGH",
+      "likelihood": "MEDIUM",
+      "impact": "HIGH",
+      "mitigations": [
+        "Enable Redis AUTH and TLS",
+        "Encrypt sensitive values before caching (application-level encryption)",
+        "Set appropriate TTL on all session keys",
+        "Use Redis ACL to restrict command access"
+      ],
+      "references": ["CWE-312", "CWE-316"]
+    },
+    {
+      "id": "T006",
+      "category": "Denial of Service",
+      "stride_letter": "D",
+      "title": "No rate limiting on public API Gateway",
+      "description": "The API Gateway has no visible rate limiting configuration. An attacker can flood endpoints with requests, exhausting compute resources and making the platform unavailable for legitimate customers.",
+      "affected_components": ["API Gateway", "All Services"],
+      "risk_level": "HIGH",
+      "likelihood": "HIGH",
+      "impact": "HIGH",
+      "mitigations": [
+        "Implement rate limiting (e.g., 100 req/min per IP, 1000/min per authenticated user)",
+        "Add Azure DDoS Protection Standard",
+        "Configure WAF rules for common attack patterns",
+        "Implement circuit breakers between services"
+      ],
+      "references": ["OWASP A05:2021", "CWE-400"]
+    },
+    {
+      "id": "T007",
+      "category": "Denial of Service",
+      "stride_letter": "D",
+      "title": "Database connection pool exhaustion",
+      "description": "Without connection pool limits, a surge of requests or a slow query attack can exhaust PostgreSQL connections, causing cascading failures across all services.",
+      "affected_components": ["PostgreSQL", "Orders Service", "Payments Service"],
+      "risk_level": "MEDIUM",
+      "likelihood": "MEDIUM",
+      "impact": "HIGH",
+      "mitigations": [
+        "Configure connection pool limits per service (e.g., PgBouncer)",
+        "Set query timeouts at application and database level",
+        "Implement async processing for non-critical database operations"
+      ],
+      "references": ["CWE-400"]
+    },
+    {
+      "id": "T008",
+      "category": "Elevation of Privilege",
+      "stride_letter": "E",
+      "title": "Admin dashboard has no network isolation",
+      "description": "The admin dashboard is accessible from the same network as customer-facing services with no separate trust boundary. A compromised customer account or SSRF vulnerability could be used to access admin functionality.",
+      "affected_components": ["Admin Dashboard", "API Gateway"],
+      "risk_level": "CRITICAL",
+      "likelihood": "MEDIUM",
+      "impact": "CRITICAL",
+      "mitigations": [
+        "Place admin dashboard behind VPN or private endpoint only",
+        "Implement separate authentication flow for admin users (MFA required)",
+        "Add IP allowlisting for admin routes at the Gateway level",
+        "Use separate deployment with dedicated service principal"
+      ],
+      "references": ["OWASP A01:2021", "CWE-284", "CWE-639"]
+    }
+  ],
+  "summary": {
+    "total_threats": 8,
+    "by_category": {
+      "S": 1,
+      "T": 1,
+      "R": 1,
+      "I": 2,
+      "D": 2,
+      "E": 1
+    },
+    "by_risk_level": {
+      "CRITICAL": 2,
+      "HIGH": 5,
+      "MEDIUM": 1,
+      "LOW": 0
+    }
+  },
+  "recommendations": [
+    "CRITICAL: Enforce TLS for all inter-service communication immediately — customer PII is at risk",
+    "CRITICAL: Isolate the admin dashboard behind VPN with mandatory MFA",
+    "HIGH: Implement mTLS and service mesh for internal service authentication",
+    "HIGH: Add rate limiting and DDoS protection to the public API Gateway",
+    "HIGH: Enable Redis TLS and AUTH; encrypt sensitive session data before caching"
+  ]
+}
